@@ -85,6 +85,11 @@ def main() -> int:
         }
         (RUNS / f'meta_{ts}.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
 
+        # Optional local hook
+        hook = ROOT / 'automation_stack' / 'hooks' / 'post_run_summary.sh'
+        if hook.exists() and out_md.exists():
+            subprocess.run(['bash', str(hook), str(out_md)], cwd=ROOT, check=False)
+
         if args.notify_mode == 'always' or (args.notify_mode == 'fail-only' and not ok):
             status = '✅ 成功' if ok else '❌ 失败'
             msg = f"[Multi-Agent V5] {status} ({ts} UTC)\n\n任务：{args.task}\n\n{summary}"
