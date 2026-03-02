@@ -1,42 +1,36 @@
 # Multi-Agent Orchestrator (Codex + Gemini)
 
-并行调用多个 CLI agent，并输出统一汇总。
+## 极致版（v5）
 
-## v4 新增能力
+新增：
+- `v5_runner.py`：一键执行全流程（plan + synth + push + 汇总）
+- 并发锁：避免重复触发导致重叠运行
+- 运行元数据落盘：`multi_agent/runs/meta_*.json`
+- 通知策略：`always | fail-only | silent`
+- `install_weekly_cron_v5.sh`：一键安装周任务（默认失败才通知）
 
-- 定时自动跑（`install_weekly_cron.sh`）
-- 运行后自动推 GitHub（通过 `--git-push`）
-- 自动 Telegram 摘要通知（`v4_runner.sh`）
-
-## 快速开始（v4）
-
-```bash
-bash multi_agent/v4_runner.sh "做一份本周副业推进复盘"
-```
-
-执行后会：
-1. 跑 `orchestrator.py`（plan + synthesize）
-2. 保存到 `multi_agent/runs/`
-3. 自动提交并推送到 `lazyshawn325/allen:main`
-4. 自动发 Telegram 摘要
-
-> 默认 Telegram 目标为 `7237940670`，可通过环境变量覆盖：
+## 一键运行（推荐）
 
 ```bash
-TG_TARGET=123456789 bash multi_agent/v4_runner.sh "你的任务"
+cd /home/ubuntu/.openclaw/workspace
+python3 multi_agent/v5_runner.py --task "做一份本周副业推进复盘" --notify-mode fail-only
 ```
 
-## 安装每周定时任务（UTC）
+## 定时任务安装
+
+默认每周一 13:00 UTC：
 
 ```bash
-bash multi_agent/install_weekly_cron.sh
+bash multi_agent/install_weekly_cron_v5.sh
 ```
 
-默认每周一 13:00 UTC 运行一次。
+自定义 cron 表达式示例（每天 01:30 UTC）：
 
-## v3 核心参数（保留）
+```bash
+bash multi_agent/install_weekly_cron_v5.sh "30 1 * * *"
+```
 
-- `--plan`：按 agent 角色自动拆任务
-- `--synthesize`：追加最终总控整合步骤
-- `--synth-agent codex`：指定谁做最终整合
-- `--agents`、`--retries`、`--save-json`、`--git-push`
+## v3/v4 仍可用
+
+- `orchestrator.py`：核心编排引擎
+- `v4_runner.sh`：shell 版本 runner
