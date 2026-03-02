@@ -2,11 +2,13 @@
   "agents": [
     {
       "name": "codex",
+      "role": "技术执行负责人：给出可落地实现步骤、脚本与风险控制",
       "command": ["codex", "exec", "{task}"],
       "timeout": 600
     },
     {
       "name": "gemini",
+      "role": "研究与策略负责人：给出备选方案、ROI、时间成本对比",
       "command": ["gemini", "-p", "{task}"],
       "timeout": 600
     }

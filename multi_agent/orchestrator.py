@@ -16,17 +16,20 @@ class AgentSpec:
     name: str
     command: List[str]
     timeout: int
+    role: str = ""
 
 
 DEFAULT_CONFIG = {
     "agents": [
         {
             "name": "codex",
+            "role": "技术执行负责人：给出可落地实现步骤、脚本与风险控制",
             "command": ["codex", "exec", "{task}"],
             "timeout": 600,
         },
         {
             "name": "gemini",
+            "role": "研究与策略负责人：给出备选方案、ROI、时间成本对比",
             "command": ["gemini", "-p", "{task}"],
             "timeout": 600,
         },
@@ -43,9 +46,27 @@ def load_config(path: Path) -> List[AgentSpec]:
                 name=a["name"],
                 command=list(a["command"]),
                 timeout=int(a.get("timeout", 600)),
+                role=str(a.get("role", "")).strip(),
             )
         )
     return out
+
+
+def build_agent_task(global_task: str, agent: AgentSpec, plan_mode: bool) -> str:
+    if not plan_mode:
+        return global_task
+
+    role = agent.role or f"{agent.name} 专家"
+    return (
+        f"目标：{global_task}\n"
+        f"你的角色：{role}\n"
+        "请输出：\n"
+        "1) 你的方案（3-5点）\n"
+        "2) 你负责的具体执行步骤（可直接执行）\n"
+        "3) 风险与兜底\n"
+        "4) 本角色可交付产物\n"
+        "要求：简洁、可落地、中文输出。"
+    )
 
 
 async def run_once(agent: AgentSpec, task: str) -> Dict:
@@ -71,6 +92,7 @@ async def run_once(agent: AgentSpec, task: str) -> Dict:
 
     return {
         "agent": agent.name,
+        "role": agent.role,
         "startedAt": started,
         "status": status,
         "exitCode": code,
@@ -93,11 +115,42 @@ async def run_one(agent: AgentSpec, task: str, retries: int) -> Dict:
     return last
 
 
-def summarize(task: str, results: List[Dict]) -> str:
+def make_synth_prompt(global_task: str, results: List[Dict]) -> str:
+    chunks = [
+        f"请把多智能体结果整合成一个最终可执行方案。\n总目标：{global_task}",
+        "输出格式：\nA. 最终方案摘要\nB. 执行清单（带优先级）\nC. 今日可直接执行的3步\nD. 风险与回退方案",
+        "以下是各代理原始输出：",
+    ]
+    for r in results:
+        body = (r.get("stdout") or "")[:3000]
+        chunks.append(f"\n[{r['agent']}|role={r.get('role','')}]\n{body}\n")
+    return "\n".join(chunks)
+
+
+async def synthesize(global_task: str, results: List[Dict], synth_agent: AgentSpec) -> Dict:
+    prompt = make_synth_prompt(global_task, results)
+    out = await run_once(synth_agent, prompt)
+    out["agent"] = f"synth:{synth_agent.name}"
+    return out
+
+
+def summarize(task: str, results: List[Dict], synthesis: Dict | None = None) -> str:
     ok = sum(1 for r in results if r["status"] == "ok")
     lines = ["# Multi-agent run", "", f"Task: {task}", f"Summary: {ok}/{len(results)} success", ""]
+
+    if synthesis and synthesis.get("stdout"):
+        lines.extend(["## Final Synthesis", "", synthesis["stdout"][:5000], ""])
+
+    lines.append("## Action Checklist")
+    for i, r in enumerate(results, 1):
+        mark = "[x]" if r["status"] == "ok" else "[ ]"
+        lines.append(f"- {mark} P{i} {r['agent']} deliverable review")
+    lines.append("")
+
     for r in results:
         lines.append(f"## {r['agent']}")
+        if r.get("role"):
+            lines.append(f"- role: {r['role']}")
         lines.append(f"- status: {r['status']}")
         lines.append(f"- exit: {r['exitCode']}")
         lines.append(f"- attempt: {r.get('attempt', 1)}/{r.get('maxAttempts', 1)}")
@@ -138,6 +191,9 @@ async def main() -> None:
     ap.add_argument("--save-json", default="", help="save raw results to JSON file path")
     ap.add_argument("--agents", default="", help="comma-separated agent names to run (e.g. codex,gemini)")
     ap.add_argument("--retries", type=int, default=0, help="retry count for non-ok results")
+    ap.add_argument("--plan", action="store_true", help="enable role-based task decomposition")
+    ap.add_argument("--synthesize", action="store_true", help="run a final synthesis step")
+    ap.add_argument("--synth-agent", default="codex", help="agent name for final synthesis")
     ap.add_argument("--git-push", action="store_true", help="auto git add/commit/push after run")
     ap.add_argument("--remote", default="lazyshawn325/allen", help="owner/repo for --git-push")
     ap.add_argument("--branch", default="main", help="target branch for --git-push")
@@ -146,7 +202,7 @@ async def main() -> None:
     cfg_path = Path(args.config)
     if not cfg_path.exists():
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        cfg_path.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
+        cfg_path.write_text(json.dumps(DEFAULT_CONFIG, indent=2, ensure_ascii=False), encoding="utf-8")
 
     agents = load_config(cfg_path)
     if not agents:
@@ -158,9 +214,17 @@ async def main() -> None:
         if not agents:
             raise SystemExit(f"No matched agents from --agents: {sorted(selected)}")
 
-    results = await asyncio.gather(*(run_one(a, args.task, max(args.retries, 0)) for a in agents))
+    task_map = {a.name: build_agent_task(args.task, a, args.plan) for a in agents}
+    results = await asyncio.gather(*(run_one(a, task_map[a.name], max(args.retries, 0)) for a in agents))
 
-    out = summarize(args.task, results)
+    synthesis = None
+    if args.synthesize:
+        synth = next((a for a in agents if a.name == args.synth_agent), None)
+        if synth is None:
+            synth = agents[0]
+        synthesis = await synthesize(args.task, results, synth)
+
+    out = summarize(args.task, results, synthesis)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(out, encoding="utf-8")
@@ -173,6 +237,8 @@ async def main() -> None:
         payload = {
             "task": args.task,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "planMode": args.plan,
+            "synthesis": synthesis,
             "results": results,
         }
         jpath.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
