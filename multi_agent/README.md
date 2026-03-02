@@ -30,7 +30,21 @@ bash multi_agent/install_weekly_cron_v5.sh
 bash multi_agent/install_weekly_cron_v5.sh "30 1 * * *"
 ```
 
-## v3/v4 仍可用
+## v6（多轮 + 验收 + 回滚策略）
+
+```bash
+cd /home/ubuntu/.openclaw/workspace
+python3 multi_agent/v6_runner.py --goal "做一个大学生副业自动化系统" --push
+```
+
+特性：
+- 自动拆 3 个子任务并多轮执行
+- 自动验收（输出质量门槛）
+- 失败自动给回滚策略
+- 可选自动 push
+
+## v3/v4/v5 仍可用
 
 - `orchestrator.py`：核心编排引擎
 - `v4_runner.sh`：shell 版本 runner
+- `v5_runner.py`：单轮极致自动化 runner
