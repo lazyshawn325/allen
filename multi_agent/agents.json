@@ -1,0 +1,14 @@
+{
+  "agents": [
+    {
+      "name": "codex",
+      "command": ["codex", "exec", "{task}"],
+      "timeout": 600
+    },
+    {
+      "name": "gemini",
+      "command": ["gemini", "-p", "{task}"],
+      "timeout": 600
+    }
+  ]
+}
